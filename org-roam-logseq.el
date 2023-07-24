@@ -21,9 +21,6 @@
 ;; it won't convert the resulting links.
 ;;
 
-;; (require 'f)
-(use-package f)
-;; (require 'org-roam)
 
 ;; Your logseq directory should be inside your org-roam directory,
 ;; put the directory you use here
