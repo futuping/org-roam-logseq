@@ -34,8 +34,8 @@
 ;;(defvar bill/rich-text-types [bold italic subscript link strike-through superscript underline inline-src-block footnote-reference inline-babel-call entity])
 (defvar bill/rich-text-types '(bold italic subscript link strike-through superscript underline inline-src-block))
 ;; ignore files matching bill/logseq-exclude-pattern
-(defvar bill/logseq-exclude-pattern (string "^" bill/logseq-folder "/logseq/.*$"))
-;; (defvar bill/logseq-exclude-pattern "^$")
+;; (defvar bill/logseq-exclude-pattern (string-join (list "^" bill/logseq-folder "/logseq/.*$")))
+(defvar bill/logseq-exclude-pattern "^$")
 
 (defun bill/textify (headline)
   (save-excursion
