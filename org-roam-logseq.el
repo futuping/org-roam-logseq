@@ -95,7 +95,7 @@
           (goto-char (1- (point)))
           (setq org (org-element-parse-buffer)))
         ;; set the title to the file name
-        (insert (format "#+title: %s\n" (f-base file)))))
+        (insert (format "#+title: %s" (f-base file)))))
     ;; ensure org-roam knows about the new id and/or title
     (when changed (save-buffer))
     (cons new-buf buf)))
