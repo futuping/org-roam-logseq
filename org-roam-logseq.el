@@ -53,10 +53,88 @@
          (list (bill/textify-all (cddr node))
                (if (> (org-element-property :post-blank node))
                    (make-string (org-element-property :post-blank node) ?\s)
-               "")))
+                 "")))
         (t "")))
 
 (defun bill/logseq-journal-p (file) (string-match-p (concat "^" bill/logseq-journals) file))
+
+(defun bill/replace-dot-with-tilde (input-str)
+  "逐一对字符串中的字符进行判断，如果句号处于数字之间，则将句号替换为~号。"
+  (let ((output-str "")
+        (len (length input-str))
+        (i 0))
+    (while (< i len)
+      (let ((current-char (aref input-str i))
+            (next-char (if (< (1+ i) len) (aref input-str (1+ i)) nil))
+            (after-next-char (if (< (+ i 2) len) (aref input-str (+ i 2)) nil)))
+        (if (and (>= current-char ?0) (<= current-char ?9)
+                 (and next-char (char-equal next-char ?.)
+                      (and after-next-char (>= after-next-char ?0) (<= after-next-char ?9))))
+            (progn
+              (setq output-str (concat output-str (char-to-string current-char) "~"))
+              (setq i (1+ i))) ; Skip the next character (the dot)
+          (setq output-str (concat output-str (char-to-string current-char))))
+        (setq i (1+ i))))
+    output-str))
+
+(defun bill/replace-tilde-with-dot (input-str)
+  "逐一对字符串中的字符进行判断，如果~号处于数字之间，则将句号替换为句号。"
+  (let ((output-str "")
+        (len (length input-str))
+        (i 0))
+    (while (< i len)
+      (let ((current-char (aref input-str i))
+            (next-char (if (< (1+ i) len) (aref input-str (1+ i)) nil))
+            (after-next-char (if (< (+ i 2) len) (aref input-str (+ i 2)) nil)))
+        (if (and (>= current-char ?0) (<= current-char ?9)
+                 (and next-char (char-equal next-char ?~)
+                      (and after-next-char (>= after-next-char ?0) (<= after-next-char ?9))))
+            (progn
+              (setq output-str (concat output-str (char-to-string current-char) "."))
+              (setq i (1+ i))) ; Skip the next character (the tidle)
+          (setq output-str (concat output-str (char-to-string current-char))))
+        (setq i (1+ i))))
+    output-str))
+
+(defun bill/capitalize-title-words (title)
+  "Capitalize the first word of the TITLE and words after '?', ':', ';', '!'."
+  (let* ((words (split-string title " "))
+         (result '())
+         (capitalize-next t))
+    (dolist (word words)
+      (when (not (string-empty-p word))
+        (push (if capitalize-next
+                  (progn
+                    (setq capitalize-next nil)
+                    (capitalize word))
+                word)
+              result)
+        (when (string-match-p "[?:;!]" (substring word -1))
+          (setq capitalize-next t))))
+    (setq result (nreverse result))
+    (string-join result " ")))
+
+(setq org-roam-dailies-capture-templates
+      '(("j" "default" entry
+         "* %?"
+         :if-new (file+head "journal.daily.%<%Y%m%d.%A>.org"
+                            "#+title: %<%Y-%m-%d %A>\n"))))
+
+(defun bill/url-encode-special-chars (string)
+  "Encode special characters in STRING using URL encoding."
+  (replace-regexp-in-string
+   "[?:;! ]"
+   (lambda (char)
+     (format "%%%02x" (string-to-char char)))
+   string))
+
+(defun bill/url-encode-special-chars-logseq (string)
+  "Encode special characters in STRING using URL encoding."
+  (replace-regexp-in-string
+   "[?:]"
+   (lambda (char)
+     (format "%%%02x" (string-to-char char)))
+   string))
 
 (defun bill/ensure-file-id (file)
   "Visit an existing file, ensure it has an id, return whether a new buffer was created"
@@ -77,17 +155,18 @@
     (goto-char 1)
     (when (not (and (eq 'section (org-element-type (nth 2 org))) (org-roam-id-at-point)))
       ;; this file has no file id
-      (setq changed t)
+      ;; (setq changed t)
       (when (eq 'headline (org-element-type (nth 2 org)))
         ;; if there's no section before the first headline, add one
         (insert "\n")
         (goto-char 1))
       (org-id-get-create)
-      (setq org (org-element-parse-buffer)))
+      (setq org (org-element-parse-buffer))
+      (save-buffer))
     (when (nth 3 org)
       (when (not (org-collect-keywords ["title"]))
         ;; no title -- ensure there's a blank line at the section end
-        (setq changed t)
+        ;; (setq changed t)
         (setq sec-end (org-element-property :end (nth 2 org)))
         (goto-char (1- sec-end))
         (when (and (not (equal "\n\n" (buffer-substring-no-properties (- sec-end 2) sec-end))))
@@ -95,13 +174,39 @@
           (goto-char (1- (point)))
           (setq org (org-element-parse-buffer)))
         ;; set the title to the file name
-        (insert (format "#+title: %s" (f-base file)))))
+        (let ((regex "^[0-9]\\{4\\}-[0-9]\\{2\\}-[0-9]\\{2\\} \\(Monday\\|Tuesday\\|Wednesday\\|Thursday\\|Friday\\|Saturday\\|Sunday\\)\\|^[0-9]\\{4\\}_[0-9]\\{2\\}_[0-9]\\{2\\}$"))
+          (if (string-match-p regex (f-base file))
+              (progn
+                (insert (format "#+title: %s" (f-base file)))
+                (save-buffer)
+                (setq templates-str (prin1-to-string org-roam-dailies-capture-templates))
+                ;; (when (string-match "journal.*\\.org" templates-str)
+                (when (string-match "file\\+head \"\\(.*\\.org\\)\"" templates-str)
+                  (setq found-file-path (match-string 1 templates-str))
+                  (when (string-match "\\([0-9]\\{4\\}-[0-9]\\{2\\}-[0-9]\\{2\\}\\) \\([A-Za-z]+\\)" (f-base file))
+                    (setq date (match-string 1 (f-base file)))
+                    (setq replaced-string (replace-regexp-in-string "%<.*?>" (format-time-string "%Y%m%d.%A" (date-to-time date)) found-file-path)))
+                  (when (string-match "\\([0-9]\\{4\\}_[0-9]\\{2\\}_[0-9]\\{2\\}\\)" (f-base file))
+                    (setq formatted-date (replace-regexp-in-string "_" "-" (f-base file)))
+                    (setq replaced-string (replace-regexp-in-string "%<.*?>" (format-time-string "%Y%m%d.%A" (date-to-time formatted-date)) found-file-path)))
+                  ;; change file name like org-roam
+                  (let* ((initial-file-directory (file-name-directory (buffer-file-name)))
+                         (replaced-string (bill/url-encode-special-chars replaced-string))
+                         (new-file (concat (expand-file-name replaced-string initial-file-directory))))
+                    (rename-file file new-file)
+                    (setq buf (find-file-noselect new-file)))))
+            (progn
+              (let ((file-name (bill/replace-dot-with-tilde (url-unhex-string (f-base file)))))
+                (let ((hierarchy-title (bill/capitalize-title-words (car (last (split-string file-name "\\."))))))
+                  (setq hierarchy-title (bill/replace-tilde-with-dot hierarchy-title))
+                  (insert (format "#+title: %s" hierarchy-title))
+                  (save-buffer))))))))
     ;; ensure org-roam knows about the new id and/or title
     (when changed (save-buffer))
     (cons new-buf buf)))
 
 (defun bill/convert-logseq-file (buf)
-  "convert fuzzy and file:../pages logseq links in the file to id links"
+  "convert fuzzy, file:../pages and block((uuid)) logseq links in the file to id links"
   (save-excursion
     (let* (changed
            link)
@@ -127,12 +232,18 @@
                     (when db-result
                       (setq changed t)
                       (setq uuid-id (car (car db-result)))
-                      (setq title (cadr (car db-result)))
+                      (setq title-id (cadr (car db-result)))
                       (delete-region (- start-pos 2) end-pos)
-                      (insert (format "[[id:%s][%s]]" uuid-id title))
-                      (message "Replaced ((%s)) with [[id:%s][%s]]" uuid uuid-id title)))))))))
+                      (insert (format "[[id:%s][%s]]" uuid-id title-id))))))))))
       ;; ensure org-roam knows about the changed links
       (when changed (save-buffer)))))
+
+;; find the type of link in org file：
+;; (require 'org-element)
+;; (setq org-tree (org-element-parse-buffer))
+;; (org-element-map org-tree 'link
+;;   (lambda (link)
+;;     (message "链接类型：%s" (org-element-property :type link))))
 
 (defun bill/reformat-link (link)
   (let (filename
@@ -153,21 +264,42 @@
           (setq linktext (buffer-substring-no-properties
                           (+ (org-element-property :begin link) 2)
                           (- (org-element-property :end link) 2)))))
-      (when (and filename (f-exists-p filename))
-        (setq id (caar (org-roam-db-query [:select id :from nodes :where (like file $s1)]
-                                          filename)))
-        (when id
-          (setq newlink (format "[[id:%s][%s]]%s"
-                                id
-                                linktext
-                                (if (> (org-element-property :post-blank link))
-                                    (make-string (org-element-property :post-blank link) ?\s)
-                                  "")))
-          (when (not (equal newlink
-                            (buffer-substring-no-properties
-                             (org-element-property :begin link)
-                             (org-element-property :end link))))
-            newlink))))))
+
+      (if (equal "id" (org-element-property :type link))
+          (progn
+            (setq linkuuid (org-element-property :path link))
+            ;; (setq id (caar (org-roam-db-query [:select id :from nodes :where (= id $s1)] linkuuid)))
+            (setq title-linkuuid (caar (org-roam-db-query [:select title :from nodes :where (= id $s1)] linkuuid)))
+            (setq new-newlink (format "[[id:%s][%s]]" linkuuid title-linkuuid))
+            (setq newlink new-newlink)
+            newlink)
+        (progn
+          (setq logseq-filename-base (bill/url-encode-special-chars-logseq (f-base filename)))
+          (setq logseq-filename (concat (file-name-directory filename) logseq-filename-base ".org"))
+          (when (and logseq-filename (f-exists-p logseq-filename))
+            (setq id-filename (caar (org-roam-db-query [:select id :from nodes :where (like file $s1)] logseq-filename)))
+            (setq title-filename (caar (org-roam-db-query [:select title :from nodes :where (like file $s1)] logseq-filename)))
+            (setq new-newlink (format "[[id:%s][%s]]" id-filename title-filename))
+            ;; change file name like org-roam
+            (let* ((directory-path (file-name-directory logseq-filename))
+                   (replace-string (bill/url-encode-special-chars (f-base logseq-filename)))
+                   (new-filename (concat (expand-file-name replace-string directory-path) ".org")))
+              (rename-file logseq-filename new-filename))
+            (when id-filename
+              (setq newlink (format "[[id:%s][%s]]%s"
+                                    id-filename
+                                    linktext
+                                    (if (> (org-element-property :post-blank link))
+                                        (make-string (org-element-property :post-blank link) ?\s)
+                                      "")))
+              (when (or (not (equal newlink
+                                    (buffer-substring-no-properties
+                                     (org-element-property :begin link)
+                                     (org-element-property :end link))))
+                        (not (equal newlink new-newlink)))
+                (progn
+                  (setq newlink new-newlink)
+                  newlink)))))))))
 
 (defun bill/roam-file-modified-p (file-path)
   (and (not (string-match-p bill/logseq-exclude-pattern file-path))
