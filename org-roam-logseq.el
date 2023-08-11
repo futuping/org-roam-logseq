@@ -155,14 +155,13 @@
     (goto-char 1)
     (when (not (and (eq 'section (org-element-type (nth 2 org))) (org-roam-id-at-point)))
       ;; this file has no file id
-      ;; (setq changed t)
+      (setq changed t)
       (when (eq 'headline (org-element-type (nth 2 org)))
         ;; if there's no section before the first headline, add one
         (insert "\n")
         (goto-char 1))
       (org-id-get-create)
-      (setq org (org-element-parse-buffer))
-      (save-buffer))
+      (setq org (org-element-parse-buffer)))
     (when (nth 3 org)
       (when (not (org-collect-keywords ["title"]))
         ;; no title -- ensure there's a blank line at the section end
